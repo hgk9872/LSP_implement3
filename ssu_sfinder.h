@@ -98,7 +98,7 @@ int check_args(int argc, char *argv[])
 {
 	char target_dir[PATHMAX];
 	
-	if (argc != 11) { // 옵션 값이 부족한 경우
+	if (argc < 9) { // 옵션 값이 부족한 경우
 		printf("Usage: fmd5 -e [FILE_EXTENSION] -l [MINSIZE] -h [MAXSIZE] -d [TARGET_DIRECTORY] -t [THREAD_NUM]\n");
 		return 1;
 	}
