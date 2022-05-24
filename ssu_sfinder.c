@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <pthread.h>
 
 // 명령어 함수만 제외하고 나머지 기능들은 헤더파일로..
 #include "ssu_sfinder.h"
@@ -60,6 +61,7 @@ int tokenize(char *input, char *argv[])
 
 void fmd5(int argc, char *argv[])
 {
+//	int threadNum;
 	int opt = 0;
 	extern char *optarg;
 
@@ -98,7 +100,6 @@ void fmd5(int argc, char *argv[])
 		}
 	}
 
-
 	if (check_args(argc, argv)) // 옵션 에러 처리
 		return;
 
@@ -107,6 +108,13 @@ void fmd5(int argc, char *argv[])
 	else // 절대경로
 		realpath(argv[8], target_dir);
 
+//	if (argc == 11) // 쓰레드의 개수를 인자로 받은 경우
+//		threadNum = atoi(argv[10]);
+//	else // 메인 쓰레드 하나 존재
+//		threadNum = 1;
+
+//	pthread_t tid[threadNum];
+
 	get_same_size_files_dir();
 
 	struct timeval begin_t, end_t;
@@ -114,7 +122,13 @@ void fmd5(int argc, char *argv[])
 	gettimeofday(&begin_t, NULL);
 
 	dirlist_append(dirlist, target_dir);
+
+
+	multiArg *arg = (multiArg *)malloc(sizeof(multiArg));
+//	arg->dirlist = dirlist;
+//	arg->threadNum = threadNum;
 	dir_traverse(dirlist);
+
 	find_duplicates();
 //	remove_no_duplicates();
 
@@ -136,6 +150,9 @@ void fmd5(int argc, char *argv[])
 
 	printf("Searching time %ld:%06ld(sec:usec)\n\n", end_t.tv_sec, end_t.tv_usec);
 
+	get_trash_path();
+
+	delete_prompt();
 
 	return;
 }

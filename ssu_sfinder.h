@@ -11,6 +11,7 @@
 #include <ctype.h>
 #include <math.h>
 #include <openssl/md5.h>
+#include <pthread.h>
 
 #define NAMEMAX 255
 #define PATHMAX 4096
@@ -37,6 +38,11 @@ typedef struct dirList {
 	struct dirList *next;
 } dirList;
 
+typedef struct multiArg {
+	dirList *dirlist;
+	int threadNum;
+} multiArg;
+
 #define DIRECTORY 1
 #define REGFILE 2
 
@@ -47,13 +53,30 @@ typedef struct dirList {
 
 char extension[10]; // 확장자
 char same_size_files_dir[PATHMAX];
-// char trash_path[PATHMAX];
+char trash_path[PATHMAX];
 long long minbsize;
 long long maxbsize;
 fileList *dups_list_h;
 
 
 long long get_size(char *filesize);
+
+int parse(char *input, char *argv[])
+{
+	char *ptr = NULL;
+	int argc = 0;
+	ptr = strtok(input, " ");
+
+	while (ptr != NULL) {
+		argv[argc++] = ptr;
+		ptr = strtok(NULL, " ");
+	}
+
+	argv[argc-1][strlen(argv[argc-1])-1] = '\0';
+
+	return argc;
+}
+
 // "*.(확장자)"를 입력받은 경우 확장자 부분만 가져오는 함수
 char *get_extension(char *filename)
 {
@@ -336,6 +359,12 @@ void dirlist_delete_all(dirList *head)
 
 void dir_traverse(dirList *dirlist)
 {
+//	multiArg *multiarg = (multiArg *)arg;
+//	printf("%dzzzzzzz\n", multiarg->threadNum);
+//	pthread_t tid;
+//	int i;
+//	multiArg thread[3];
+//	dirList *dirlist = multiarg->dirlist;
 	dirList *cur = dirlist->next;
 	dirList *subdirs = (dirList *)malloc(sizeof(dirList));
 
@@ -410,8 +439,17 @@ void dir_traverse(dirList *dirlist)
 
 	dirlist_delete_all(dirlist);
 
-	if (subdirs->next != NULL) // dirlist의 하위 디렉토리가 있다면 재귀방식으로 순회
+	if (subdirs->next != NULL)
 		dir_traverse(subdirs);
+
+//	multiarg->dirlist = subdirs;
+
+//	if (subdirs->next != NULL) { // dirlist의 하위 디렉토리가 있다면 재귀방식으로 순회
+//		for (i = 0; i < 3; i++) 
+//			pthread_create(&tid[3], NULL, dir_traverse, (void *)(thread+i));
+//	}
+
+//	pthread_exit(NULL);
 }
 
 /* fileInfo 리스트에 fileinfo 구조체 추가하는 함수 */
@@ -585,12 +623,301 @@ void filelist_print_format(fileList *head)
 		while (fileinfolist_cur != NULL) { // 중복파일에 대한 정보 fileinfo 리스트 순회
 			sec_to_ymdt(localtime(&fileinfolist_cur->statbuf.st_mtime), mtime);
 			sec_to_ymdt(localtime(&fileinfolist_cur->statbuf.st_atime), atime);
-			printf("[%d] %s (mtime : %s) (atime : %s)\n", i++, fileinfolist_cur->path, mtime, atime);
+			printf("[%d] %s (mtime : %s) (atime : %s) (uid : %ld) (gid : %ld) (mode : %o)\n", i++, fileinfolist_cur->path, mtime, atime, (long)fileinfolist_cur->statbuf.st_uid, (long)fileinfolist_cur->statbuf.st_gid, (unsigned int)fileinfolist_cur->statbuf.st_mode);
 
 			fileinfolist_cur = fileinfolist_cur->next;
 		}
 		printf("\n");
 
 		filelist_cur = filelist_cur->next;
+	}
+}
+
+void get_trash_path(void)
+{
+	if (getuid() == 0) {
+		get_path_from_home("~/Trash/", trash_path);
+
+		if (access(trash_path, F_OK) == 0)
+			remove_files(trash_path);
+		else
+			mkdir(trash_path, 0755);
+	}
+	else
+		get_path_from_home("~/.local/share/Trash/files/", trash_path);
+}
+
+// 가장 최근에 수정된 파일의 시간 리턴하고, 경로를 path인자에 저장
+time_t get_recent_mtime(fileInfo *head, char *last_filepath)
+{
+	fileInfo *fileinfo_cur = head->next;
+	time_t mtime = 0;
+
+	while (fileinfo_cur != NULL) { // 중복파일 세트 내 파일리스트들을 순회
+		if (fileinfo_cur->statbuf.st_mtime > mtime) { // 가장 mtime이 큰(최근의) 파일 저장
+			mtime = fileinfo_cur->statbuf.st_mtime;
+			strcpy(last_filepath, fileinfo_cur->path); // 가장 최근 파일경로 저장
+		}
+		fileinfo_cur = fileinfo_cur->next;
+	}
+	return mtime;
+}
+
+/* 파일세트의 노드 개수를 리턴하는 함수 */
+int filelist_size(fileList *head)
+{
+	fileList *cur = head->next;
+	int size = 0;
+
+	while (cur != NULL) {
+		size++;
+		cur = cur->next;
+	}
+
+	return size;
+}
+
+/* 특정 파일세트에 있는 중복된 파일리스트의 노드 개수를 리턴하는 함수 */
+int fileinfolist_size(fileInfo *head)
+{
+	fileInfo *cur = head->next;
+	int size = 0;
+
+	while (cur != NULL) {
+		size++;
+		cur = cur->next;
+	}
+
+	return size;
+}
+
+/* 입력받은 path와 일치하는 중복파일세트내 파일노드 삭제하고 그 다음 노드 리턴 */
+fileInfo *fileinfo_delete_node(fileInfo *head, char *path)
+{
+	fileInfo *deleted;
+
+	if (!strcmp(head->next->path, path)) { // 해당 중복파일세트의 가장 첫번째 리스트
+		deleted = head->next;
+		head->next = head->next->next;
+		return head->next;
+	}
+	else {
+		fileInfo *fileinfo_cur = head->next;
+
+		while (fileinfo_cur->next != NULL) {
+			if (!strcmp(fileinfo_cur->next->path, path)) {
+				deleted = fileinfo_cur->next;
+
+				fileinfo_cur->next = fileinfo_cur->next->next;
+				return fileinfo_cur->next;
+			}
+
+			fileinfo_cur = fileinfo_cur->next;
+		}
+	}
+}
+
+/* 입력받은 해시값을 비교하여 특정 중복파일세트 삭제 */
+void filelist_delete_node(fileList *head, char *hash)
+{
+	fileList *deleted;
+
+	if (!strcmp(head->next->hash, hash)) { // 첫번째 노드 해시가 입력받은 해시와 같은 경우
+		deleted = head->next;
+		head->next = head->next->next;
+	}
+	else {
+		fileList *filelist_cur = head->next;
+
+		while (filelist_cur->next != NULL) {
+			if (!strcmp(filelist_cur->next->hash, hash)) { // 순회하면서 비교
+				deleted = filelist_cur->next;
+
+				filelist_cur->next = filelist_cur->next->next;
+				break;
+			}
+
+			filelist_cur = filelist_cur->next;
+		}
+	}
+
+	free(deleted);
+}
+
+/* delete 명령어를 위한 프롬프트 출력 및 명령어 실행 */
+void delete_prompt(void)
+{
+	while (filelist_size(dups_list_h) > 0) { // 중복파일 리스트가 1개 이상인 경우
+		int opt = 0;
+		char input[STRMAX];
+		char last_filepath[PATHMAX];
+		char modifiedtime[STRMAX];
+		char *argv[ARGMAX];
+		char set_num[STRMAX] = {0, };
+		char list_num[STRMAX] = {0, };
+		int argc = 0;
+		int set_idx;
+		time_t mtime = 0;
+		fileList *target_filelist_p;
+		fileInfo *target_infolist_p;
+
+		printf(">> "); // 프롬프트 출력
+
+		fgets(input, sizeof(input), stdin);
+
+		if (!strcmp(input, "exit\n")) { // exit 입력받는 경우
+			printf(">> Back to Prompt\n");
+			break;
+		}
+		else if (!strcmp(input, "\n"))
+			continue;
+
+		argc = parse(input, argv);
+
+		if (strcmp(argv[0], "delete")) // delete 명령어가 아닌 경우
+				continue;
+
+		printf("%s\n", argv[0]);
+
+		optind = 1;
+
+		while ((opt = getopt(argc, argv, "l:d:ift")) != -1)
+		{
+			switch(opt)
+			{
+				case 'l': // -l 옵션 중복파일 세트 번호
+					printf("l: set number %s\n", optarg);
+					strcpy(set_num, optarg);
+					break;
+				case 'd': // -d 옵션 파일 리스트 번호
+					printf("d: list number %s\n", optarg);
+					strcpy(list_num, optarg);
+					break;
+				case 'i':
+					break;
+				case 'f':
+					break;
+				case 't':
+					break;
+				case '?': // 그 외의 옵션
+					printf("undefined option -%c\n", optopt);
+					break;
+			}
+		}
+
+		if (argc < 4 || argc > 5) {
+			printf("ERROR: delete -l [SET_INDEX] -opt\n");
+			continue;
+		}
+
+		if (strcmp(argv[1], "-l")) { // -l 옵션 에러처리
+			printf("Usage: delete -l [SET_INDEX] -opt \n");
+			continue;
+		}
+
+		if (!atoi(set_num)) { // -l 인자가 숫자 값이 아닌 경우
+			printf("ERROR: [SET_INDEX] should be a number\n");
+			continue;
+		}
+
+		if (atoi(set_num) < 0 || atoi(set_num) > filelist_size(dups_list_h)) { // 범위 에러처리
+			printf("ERROR: [SET_INDEX] out of range\n");
+			continue;
+		}
+
+		target_filelist_p = dups_list_h->next;
+
+		set_idx = atoi(set_num);
+
+		while (--set_idx)
+			target_filelist_p = target_filelist_p->next;
+
+		target_infolist_p = target_filelist_p->fileInfoList;
+
+		mtime = get_recent_mtime(target_infolist_p, last_filepath);
+		sec_to_ymdt(localtime(&mtime), modifiedtime);
+
+		if (!strcmp(argv[3], "-d")) { // -d 옵션
+			fileInfo *deleted;
+			int list_idx;
+
+			// 파일리스트 인덱스 인자 에러처리
+			if (list_num == NULL || (list_idx = atoi(list_num)) == 0) {
+				printf("ERROR: There should be an index\n");
+				continue;
+			}
+
+			// 파일 리스트 인덱스의 범위 에러처리
+			if (list_idx < 0 || list_idx > fileinfolist_size(target_infolist_p)) {
+				printf("ERROR: [LIST_IDX] out of range\n");
+				continue;
+			}
+
+			deleted = target_infolist_p;
+
+			while (list_idx--)
+				deleted = deleted->next;
+
+			printf("\"%s\" has been deleted in #%d\n\n", deleted->path, atoi(list_num));
+	//		remove(deleted->path);
+			fileinfo_delete_node(target_infolist_p, deleted->path);
+
+			if (fileinfolist_size(target_infolist_p) < 2) // 해당 중복파일세트의 파일목록이 2개보다 작은경우
+				filelist_delete_node(dups_list_h, target_filelist_p->hash);
+		}
+		else if(!strcmp(argv[3], "-i")) {
+			char ans[STRMAX];
+			fileInfo *fileinfo_cur = target_infolist_p->next;
+			fileInfo *deleted_list = (fileInfo *)malloc(sizeof(fileInfo));
+			fileInfo *tmp;
+			int listcnt = fileinfolist_size(target_infolist_p);
+
+			while (fileinfo_cur != NULL && listcnt--) {
+				printf("Delete \"%s\"? [y/n]", fileinfo_cur->path);
+				memset(ans, 0, sizeof(ans));
+				fgets(ans, sizeof(ans), stdin);
+
+				if (!strcmp(ans, "y\n") || !strcmp(ans, "Y\n")){
+	//				remove(fileinfo_cur->path);
+					fileinfo_cur = fileinfo_delete_node(target_infolist_p, fileinfo_cur->path);
+				}
+				else if (!strcmp(ans, "n\n") || !strcmp(ans, "N\n"))
+					fileinfo_cur = fileinfo_cur->next;
+				else {
+					printf("ERROR: Answer should be 'y/Y' or 'n/N'\n");
+					break;
+				}
+			}
+
+			if (fileinfolist_size(target_infolist_p) < 2)
+				filelist_delete_node(dups_list_h, target_filelist_p->hash);
+		}
+		else if (!strcmp(argv[3], "-f")) {
+			fileInfo *tmp;
+			fileInfo *deleted = target_infolist_p->next;
+
+			while (deleted != NULL) {
+				tmp = deleted->next; // 임시저장용 노드
+
+				// 가장 최근에 수정된 파일인 경우
+				if (!strcmp(deleted->path, last_filepath)) {
+					deleted = tmp; // 다음 노드로 건너뜀
+					continue;
+				}
+	//			remove(deleted->path);
+				free(deleted);
+				deleted = tmp;
+			}
+
+			filelist_delete_node(dups_list_h, target_filelist_p->hash);
+			printf("Left file in #%d : %s (%s)\n\n", atoi(set_num), last_filepath, modifiedtime);
+		}
+
+
+		filelist_print_format(dups_list_h);
+			
+
+
+
 	}
 }
