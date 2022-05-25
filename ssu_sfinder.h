@@ -51,6 +51,7 @@ typedef struct multiArg {
 #define GB 1024*1024*1024
 #define SIZE_ERROR -2
 
+int set_idx;
 char extension[10]; // 확장자
 char same_size_files_dir[PATHMAX];
 char trash_path[PATHMAX];
@@ -667,7 +668,7 @@ void filesize_with_comma(long long filesize, char *filesize_w_comma)
 void filelist_print_format(fileList *head)
 {
 	fileList *filelist_cur = head->next;
-	int set_idx = 1;
+	set_idx = 1;
 
 	while (filelist_cur != NULL) { // 파일리스트의 모든 노드 순회
 		fileInfo *fileinfolist_cur = filelist_cur->fileInfoList->next;
@@ -842,7 +843,7 @@ void delete_prompt(void)
 		char set_num[STRMAX] = {0, };
 		char list_num[STRMAX] = {0, };
 		int argc = 0;
-		int set_idx;
+		int set_idex;
 		time_t mtime = 0;
 		fileList *target_filelist_p;
 		fileInfo *target_infolist_p;
@@ -913,9 +914,9 @@ void delete_prompt(void)
 
 		target_filelist_p = dups_list_h->next;
 
-		set_idx = atoi(set_num);
+		set_idex = atoi(set_num);
 
-		while (--set_idx)
+		while (--set_idex)
 			target_filelist_p = target_filelist_p->next;
 
 		target_infolist_p = target_filelist_p->fileInfoList;
@@ -1048,3 +1049,246 @@ void delete_prompt(void)
 	}
 }
 
+void fileset_swap(fileList *a, fileList *b)
+{
+    long long temp = a->filesize;
+	a->filesize = b->filesize;
+	b->filesize = temp;
+
+	char hash[PATHMAX];
+	strcpy(hash, a->hash);
+	strcpy(a->hash, b->hash);
+	strcpy(b->hash, hash);
+
+	fileInfo *tmp;
+	tmp = a->fileInfoList;
+	a->fileInfoList = b->fileInfoList;
+	b->fileInfoList = tmp;
+
+}
+
+/* 파일 세트들을 파일사이즈 기준으로 내림차순 정렬 */
+void fileset_down_sort(fileList *head)
+{
+	int swapped, i;
+	fileList *ptr;
+	fileList *lptr = NULL;
+
+	fileList *cur = head->next;
+
+	if (cur == NULL)
+		return;
+
+	do
+	{
+		swapped = 0;
+		ptr = cur;
+
+		while (ptr->next != lptr)
+		{
+			if (ptr->filesize < ptr->next->filesize)
+			{
+				fileset_swap(ptr, ptr->next);
+				swapped = 1;
+			}
+			ptr = ptr->next;
+		}
+		lptr = ptr;
+	}
+	while (swapped);
+}
+
+/* 파일 세트들을 파일사이즈 기준으로 오름차순 정렬 */
+void fileset_up_sort(fileList *head)
+{   
+    int swapped, i;
+    fileList *ptr; 
+    fileList *lptr = NULL;
+    
+    fileList *cur = head->next;
+    
+    if (cur == NULL)
+        return;
+    
+    do
+    {
+        swapped = 0;
+        ptr = cur;
+
+        while (ptr->next != lptr)
+        {
+            if (ptr->filesize > ptr->next->filesize)
+            {
+                fileset_swap(ptr, ptr->next);
+                swapped = 1;
+            }
+            ptr = ptr->next;
+        }
+        lptr = ptr;
+    }
+    while (swapped);
+}
+
+
+/* 파일리스트 노드 간에 파일이름 교환하는 함수 */
+void path_swap(fileInfo *a, fileInfo *b)
+{
+	char temp[PATHMAX];
+	strcpy(temp, a->path);
+	strcpy(a->path, b->path);
+	strcpy(b->path, temp);
+
+	struct stat tmp;
+    tmp = a->statbuf;
+    a->statbuf = b->statbuf;
+    b->statbuf = tmp;
+
+}
+
+/* 파일세트 내 파일리스트들을 이름 기준으로 내림차순 정렬하는 함수 */
+void name_down_sort(fileList *head)
+{
+	fileList *filelist_cur = head->next;
+
+	while (filelist_cur != NULL) { // 각 파일리스트 세트마다
+		int swapped;
+		fileInfo *ptr;
+		fileInfo *lptr = NULL;
+		fileInfo *cur = filelist_cur->fileInfoList->next;
+
+		if (cur == NULL)
+			return;
+
+		do
+		{
+			swapped = 0;
+			ptr = cur;
+			
+			while (ptr->next != lptr)
+			{
+				if (strcmp(ptr->path, ptr->next->path) < 0 )  // 오른쪽 문자열이 더 큼
+				{
+					path_swap(ptr, ptr->next);
+					swapped = 1;
+				}
+				ptr = ptr->next;
+			}
+			lptr = ptr;
+		}
+		while (swapped);
+
+		filelist_cur = filelist_cur->next;
+	}
+}
+
+/* 파일세트 내 파일리스트들을 이름 기준으로 오름차순 정렬하는 함수 */
+void name_up_sort(fileList *head)
+{
+	fileList *filelist_cur = head->next;
+	
+	while (filelist_cur != NULL) {
+		int swapped;
+		fileInfo *ptr;
+		fileInfo *lptr = NULL;
+		fileInfo *cur = filelist_cur->fileInfoList->next;
+
+		if (cur == NULL)
+			return;
+
+		do
+		{
+			swapped = 0;
+			ptr = cur;
+
+			while (ptr->next != lptr)
+			{
+				if (strcmp(ptr->path, ptr->next->path) > 0) // 오름차순 정렬
+				{
+					path_swap(ptr, ptr->next);
+					swapped = 1;
+				}
+				ptr = ptr->next;
+			}
+			lptr = ptr;
+		}
+		while (swapped);
+
+		filelist_cur = filelist_cur->next;
+	}
+}
+
+/* 파일리스트의 내용을 카테고리비교를 통해 내림차순 정렬 */
+void category_down_sort(fileList *head, char *category)
+{
+	char c_flag = 'S';
+
+	if (!strcmp(category, "uid"))
+		c_flag = 'U';
+	else if (!strcmp(category, "gid"))
+		c_flag = 'G';
+	else if (!strcmp(category, "mode"))
+		c_flag = 'M';
+	else
+		c_flag = 'S';
+
+    fileList *filelist_cur = head->next;
+
+    while (filelist_cur != NULL) {
+        int swapped;
+        fileInfo *ptr;
+        fileInfo *lptr = NULL;
+        fileInfo *cur = filelist_cur->fileInfoList->next;
+
+        if (cur == NULL)
+            return;
+
+        do
+        {
+            swapped = 0;
+            ptr = cur;
+
+            while (ptr->next != lptr)
+            {
+				switch(c_flag)
+				{
+					case 'U':
+						if (ptr->statbuf.st_uid < ptr->next->statbuf.st_uid)
+						{
+							path_swap(ptr, ptr->next);
+							swapped = 1;
+						}
+						break;
+
+					case 'G':
+						if (ptr->statbuf.st_gid < ptr->next->statbuf.st_gid)
+						{
+							path_swap(ptr, ptr->next);
+							swapped = 1;
+						}
+						break;
+
+					case 'M':
+						if (ptr->statbuf.st_mode < ptr->next->statbuf.st_mode)
+						{
+							path_swap(ptr, ptr->next);
+							swapped = 1;
+						}
+						break;
+
+					case 'S':
+						if (ptr->statbuf.st_size < ptr->next->statbuf.st_size)
+						{
+							path_swap(ptr, ptr->next);
+							swapped = 1;
+						}
+						break;
+				}
+				ptr = ptr->next;
+             }
+             lptr = ptr;
+        }
+        while (swapped);
+
+        filelist_cur = filelist_cur->next;
+    }
+}

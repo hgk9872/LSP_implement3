@@ -10,10 +10,16 @@
 
 int tokenize(char *input, char *argv[]);
 void fmd5(int argc, char *argv[]);
+void list(int argc, char *argv[]);
 void help(void);
 
 int main(void)
 {
+	dups_list_h = (fileList *)malloc(sizeof(fileList));
+	
+	memset(dups_list_h, 0, sizeof(dups_list_h));
+	dups_list_h->next = NULL;
+
 	while (1) {
 		char input[STRMAX];
 		char *argv[ARGMAX];
@@ -34,6 +40,9 @@ int main(void)
 
 		else if (!strcmp(argv[0], "fmd5")) 
 			fmd5(argc, argv);
+
+		else if (!strcmp(argv[0], "list"))
+			list(argc, argv);
 
 		else
 			help();
@@ -63,6 +72,7 @@ void fmd5(int argc, char *argv[])
 {
 //	int threadNum;
 	int opt = 0;
+	int err = 0;
 	extern char *optarg;
 
 	char target_dir[PATHMAX];
@@ -71,7 +81,6 @@ void fmd5(int argc, char *argv[])
 
 	memset(dirlist, 0, sizeof(dirlist));
 	dirlist->next = NULL;
-
 
 	optind = 1;
 
@@ -95,10 +104,13 @@ void fmd5(int argc, char *argv[])
 				printf("쓰레드 구현해야함\n");
 				break;
 			case '?': // 다른 옵션 들어온 경우
-				printf("invalid option!\n");
-				return;
+				err = -1;
+				break;
 		}
 	}
+
+	if (err == -1) // 잘못된 옵션 에러 처리
+		return;
 
 	if (check_args(argc, argv)) // 옵션 에러 처리
 		return;
@@ -157,6 +169,96 @@ void fmd5(int argc, char *argv[])
 
 	return;
 }
+
+void list(int argc, char *argv[])
+{
+	if (dups_list_h->next == NULL) {
+		printf("ERROR: [fmd5] command must be executed before [list]\n");
+		return;
+	}
+
+	int opt = 0;
+	int flag_l = 0; // LIST_TYPE 플래그, 디폴트 "fileset"
+	int flag_c = 0; // CATEGORY 플래그, 디폴트 "size"
+	int flag_o = 1; // ORDER 플래그, 디폴트 1(오름차순)
+	int err = 0;
+	char category[NAMEMAX];
+
+	optind = 1;
+
+	while ((opt = getopt(argc, argv, "l:c:o:")) != -1)
+	{
+		switch(opt)
+		{
+			case 'l': // LIST_TYPE
+				if (!strcmp(optarg, "filelist")) // 옵션이 파일리스트
+					flag_l = 1;
+				else // fileset 또는 다른 값을 입력받는 경우(디폴트 처리)
+					flag_l = 0;
+				break;
+			case 'c': // CATEGORY
+				if (!strcmp(optarg, "filename"))
+					flag_c = 1;
+				else // size 입력 또는 그 외의 값이 입력받은 경우
+					strcpy(category, optarg);
+				break;
+			case 'o':
+				if (!strcmp(optarg, "-1")) // 내림차순
+					flag_o = -1;
+				else // 오름차순
+					flag_o = 1;
+				break;
+			case '?':
+				err = -1;
+				break;
+		}
+	}
+
+	if (err == -1)
+		return;
+
+	/* 인자 입력개수 처리 해야함 */
+	
+	// filelist 정렬하는 경우 (l옵션 입력값 filelist)
+	if (flag_l == 1) {
+		if (flag_c == 1) { // filename으로 정렬
+			if (flag_o == -1) // 내림차순 정렬
+				name_down_sort(dups_list_h);
+			else
+				name_up_sort(dups_list_h);
+		}
+		else if (flag_c == 0) { // stat buf이용하여 정렬하는 경우
+			if (!strcmp(category, "size") || !strcmp(category, "uid") || !strcmp(category, "gid") || !strcmp(category, "mode") || !strcmp(category, "")) {
+				if (flag_o == -1)  // 내림차순 정렬
+					category_down_sort(dups_list_h, category);
+				//else
+				//	stat_up_sort(dups_list_h, category);
+			}
+			else {
+				printf("ERROR: -c option must be [filename] or [size] or [uid] or [gid] or [mode]\n");
+				return;
+			}
+		}
+	}
+	else {// fileset 정렬
+		if (flag_c != 0) {// size외의 다른 옵션을 입력받은 경우
+			printf("fileset sort: -c [option] only available [size]\n");
+			return;
+		}
+
+		if (flag_o == -1) {// 만약 내림차순 정렬 입력받은 경우
+			fileset_down_sort(dups_list_h);
+		}
+		else
+			fileset_up_sort(dups_list_h);
+	}
+
+	filelist_print_format(dups_list_h);
+
+	return;
+}
+
+
 
 void help(void)
 {
