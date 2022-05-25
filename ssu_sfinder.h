@@ -60,6 +60,7 @@ fileList *dups_list_h;
 
 
 long long get_size(char *filesize);
+int get_dirlist(char *target_dir, struct dirent ***namelist);
 
 int parse(char *input, char *argv[])
 {
@@ -102,6 +103,55 @@ void get_path_from_home(char *path, char *path_from_home)
 		strncpy(path_without_home, path + 1, strlen(path) - 1);
 		sprintf(path_from_home, "%s%s", home_path, path_without_home);
 	}
+}
+
+void get_filename(char *path, char* filename)
+{
+	char tmp_name[NAMEMAX];
+	char *pt = NULL;
+
+	memset(tmp_name, 0, sizeof(tmp_name));
+
+	if (strrchr(path, '/') != NULL)
+		strcpy(tmp_name, strrchr(path, '/') + 1);
+	else
+		strcpy(tmp_name, path);
+
+	if ((pt = get_extension(tmp_name)) != NULL)
+		pt[-1] = '\0';
+
+	if (strchr(path, '/') == NULL && (pt = strrchr(tmp_name, '.')) != NULL)
+		pt[0] = '\0';
+
+	strcpy(filename, tmp_name);
+}
+
+void get_new_file_name(char *org_filename, char *new_filename)
+{
+	char new_trash_path[PATHMAX];
+	char tmp[NAMEMAX];
+	struct dirent **namelist;
+	int trashlist_cnt;
+	int same_name_cnt = 1;
+
+	get_filename(org_filename, new_filename);
+	trashlist_cnt = get_dirlist(trash_path, &namelist);
+
+	for (int i = 0; i < trashlist_cnt; i++) {
+		if (!strcmp(namelist[i]->d_name, ".") || !strcmp(namelist[i]->d_name, ".."))
+			continue;
+
+		memset(tmp, 0, sizeof(tmp));
+		get_filename(namelist[i]->d_name, tmp);
+
+		if (!strcmp(new_filename, tmp))
+			same_name_cnt++;
+	}
+
+	sprintf(new_filename + strlen(new_filename), ".%d", same_name_cnt);
+
+	if (get_extension(org_filename) != NULL)
+		sprintf(new_filename + strlen(new_filename), ".%s", get_extension(org_filename));
 }
 
 int is_dir(char *target_dir)
@@ -304,7 +354,7 @@ void remove_files(char *dir)
 /* 같은 사이즈 파일 보관하는 폴더 생성 */
 void get_same_size_files_dir(void)
 {
-    get_path_from_home("~/20192209", same_size_files_dir);
+    get_path_from_home("~/.20192209", same_size_files_dir);
   
     // 폴더 초기화
     if (access(same_size_files_dir, F_OK) == 0)
@@ -312,6 +362,16 @@ void get_same_size_files_dir(void)
     else
         mkdir(same_size_files_dir, 0755);
 } 
+
+void get_trash_dir(void)
+{
+	get_path_from_home("~/Trash/files", trash_path);
+
+	if (access(trash_path, F_OK) == 0)
+		remove_files(trash_path);
+	else
+		mkdir(trash_path, 0755);
+}
 
 // md5 해쉬값 구하는 함수
 int md5_hash(char *target_path, char *hash_result)
@@ -635,16 +695,12 @@ void filelist_print_format(fileList *head)
 
 void get_trash_path(void)
 {
-	if (getuid() == 0) {
-		get_path_from_home("~/Trash/", trash_path);
+	get_path_from_home("~/Trash/files/", trash_path);
 
-		if (access(trash_path, F_OK) == 0)
-			remove_files(trash_path);
-		else
-			mkdir(trash_path, 0755);
-	}
+	if (access(trash_path, F_OK) == 0)
+		remove_files(trash_path);
 	else
-		get_path_from_home("~/.local/share/Trash/files/", trash_path);
+		mkdir(trash_path, 0755);
 }
 
 // 가장 최근에 수정된 파일의 시간 리턴하고, 경로를 path인자에 저장
@@ -743,6 +799,36 @@ void filelist_delete_node(fileList *head, char *hash)
 
 	free(deleted);
 }
+
+/* 작업 수행한 명령어에 대한 로그 기록하는 함수 */
+void record_log(char *command, char *origin_path)
+{
+	FILE *fp;
+	struct tm *t;
+	time_t now = time(NULL);
+	char log_file[PATHMAX*2];
+	char log_time[STRMAX];
+	char user_name[NAMEMAX];
+	
+	strcpy(user_name, strrchr(getenv("HOME"), '/') + 1);
+
+	t = localtime(&now);
+	sec_to_ymdt(t, log_time);
+
+	sprintf(log_file, "%s", "/home/kyun/duplicate.log");
+
+	if ((fp = fopen(log_file, "a")) == NULL) {
+		printf("ERROR: fopen error for %s\n", log_file);
+		return;
+	}
+
+	fprintf(fp, "[%s] %s %s %s\n", command, origin_path, log_time, user_name);
+
+	fclose(fp);
+
+	printf("[%s] %s %s\n", command, origin_path, log_time);
+}
+
 
 /* delete 명령어를 위한 프롬프트 출력 및 명령어 실행 */
 void delete_prompt(void)
@@ -860,6 +946,7 @@ void delete_prompt(void)
 
 			printf("\"%s\" has been deleted in #%d\n\n", deleted->path, atoi(list_num));
 	//		remove(deleted->path);
+			record_log("DELETE", deleted->path);
 			fileinfo_delete_node(target_infolist_p, deleted->path);
 
 			if (fileinfolist_size(target_infolist_p) < 2) // 해당 중복파일세트의 파일목록이 2개보다 작은경우
@@ -912,12 +999,52 @@ void delete_prompt(void)
 			filelist_delete_node(dups_list_h, target_filelist_p->hash);
 			printf("Left file in #%d : %s (%s)\n\n", atoi(set_num), last_filepath, modifiedtime);
 		}
+		else if (!strcmp(argv[3], "-t")) {
+			fileInfo *tmp;
+			fileInfo *deleted = target_infolist_p->next;
+			char move_to_trash[PATHMAX];
+			char filename[PATHMAX];
+
+			while (deleted != NULL) {
+				tmp = deleted->next;
+
+				if (!strcmp(deleted->path, last_filepath)) { // 최근 수정된 파일은 건너뜀
+					deleted = tmp;
+					continue;
+				}
+
+				memset(move_to_trash, 0, sizeof(move_to_trash)); // 문자열 내용 초기화
+				memset(filename, 0, sizeof(filename));
+
+				sprintf(move_to_trash, "%s/%s", trash_path, strrchr(deleted->path, '/')+1);
+
+				if (access(move_to_trash, F_OK) == 0) { // 기존에 동일한 파일명이 있는 경우
+					printf("동일한 파일명이 존재하여 (dup)이 붙습니다 -> filename(dup)\n");
+					sprintf(move_to_trash, "%s%s", move_to_trash, "(dup)");
+			//		get_new_file_name(deleted->path, filename);
+
+		//			strncpy(strrchr(move_to_trash, '/') + 1, filename, strlen(filename));
+				}
+				else // 없는 경우 
+					strcpy(filename, strrchr(deleted->path, '/') + 1);
+
+				if (rename(deleted->path, move_to_trash) == -1) { // 쓰레기통 경로로 파일 경로를 변경
+					printf("ERROR: Fail to move duplicates to Trash\n");
+					break;
+				}
+
+				free(deleted);
+				deleted = tmp;
+			}
+
+			filelist_delete_node(dups_list_h, target_filelist_p->hash);
+			printf("All files in #%d have moved to Trash except \"%s\" (%s)\n\n", atoi(set_num), last_filepath, modifiedtime);
+		}
 
 
 		filelist_print_format(dups_list_h);
-			
-
 
 
 	}
 }
+

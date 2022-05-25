@@ -150,7 +150,8 @@ void fmd5(int argc, char *argv[])
 
 	printf("Searching time %ld:%06ld(sec:usec)\n\n", end_t.tv_sec, end_t.tv_usec);
 
-	get_trash_path();
+	get_trash_dir();
+	printf("trash : %s\n", trash_path);
 
 	delete_prompt();
 
