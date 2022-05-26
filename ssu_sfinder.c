@@ -89,19 +89,14 @@ void fmd5(int argc, char *argv[])
 		switch(opt) 
 		{
 			case 'e': // 파일 확장자 옵션
-				printf("e: extension %s\n", optarg);
 				break;
 			case 'l': // 파일 최소 사이즈
-				printf("l: minsize %s\n", optarg);
 				break;
 			case 'h':
-				printf("h: maxsize %s\n", optarg);
 				break;
 			case 'd':
-				printf("d: target_directory %s\n", optarg);
 				break;
 			case 't':
-				printf("쓰레드 구현해야함\n");
 				break;
 			case '?': // 다른 옵션 들어온 경우
 				err = -1;
@@ -136,7 +131,7 @@ void fmd5(int argc, char *argv[])
 	dirlist_append(dirlist, target_dir);
 
 
-	multiArg *arg = (multiArg *)malloc(sizeof(multiArg));
+//	multiArg *arg = (multiArg *)malloc(sizeof(multiArg));
 //	arg->dirlist = dirlist;
 //	arg->threadNum = threadNum;
 	dir_traverse(dirlist);
@@ -163,7 +158,6 @@ void fmd5(int argc, char *argv[])
 	printf("Searching time %ld:%06ld(sec:usec)\n\n", end_t.tv_sec, end_t.tv_usec);
 
 	get_trash_dir();
-	printf("trash : %s\n", trash_path);
 
 	delete_prompt();
 
@@ -231,8 +225,8 @@ void list(int argc, char *argv[])
 			if (!strcmp(category, "size") || !strcmp(category, "uid") || !strcmp(category, "gid") || !strcmp(category, "mode") || !strcmp(category, "")) {
 				if (flag_o == -1)  // 내림차순 정렬
 					category_down_sort(dups_list_h, category);
-				//else
-				//	stat_up_sort(dups_list_h, category);
+				else               // 오름차순 정렬
+					category_up_sort(dups_list_h, category);
 			}
 			else {
 				printf("ERROR: -c option must be [filename] or [size] or [uid] or [gid] or [mode]\n");

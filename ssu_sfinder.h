@@ -366,7 +366,7 @@ void get_same_size_files_dir(void)
 
 void get_trash_dir(void)
 {
-	get_path_from_home("~/Trash/files", trash_path);
+	get_path_from_home("~/.Trash/files", trash_path);
 
 	if (access(trash_path, F_OK) == 0)
 		remove_files(trash_path);
@@ -696,7 +696,7 @@ void filelist_print_format(fileList *head)
 
 void get_trash_path(void)
 {
-	get_path_from_home("~/Trash/files/", trash_path);
+	get_path_from_home("~/.Trash/files/", trash_path);
 
 	if (access(trash_path, F_OK) == 0)
 		remove_files(trash_path);
@@ -816,7 +816,7 @@ void record_log(char *command, char *origin_path)
 	t = localtime(&now);
 	sec_to_ymdt(t, log_time);
 
-	sprintf(log_file, "%s", "/home/kyun/duplicate.log");
+	get_path_from_home("~/.duplicate.log", log_file);
 
 	if ((fp = fopen(log_file, "a")) == NULL) {
 		printf("ERROR: fopen error for %s\n", log_file);
@@ -864,8 +864,6 @@ void delete_prompt(void)
 		if (strcmp(argv[0], "delete")) // delete 명령어가 아닌 경우
 				continue;
 
-		printf("%s\n", argv[0]);
-
 		optind = 1;
 
 		while ((opt = getopt(argc, argv, "l:d:ift")) != -1)
@@ -873,11 +871,9 @@ void delete_prompt(void)
 			switch(opt)
 			{
 				case 'l': // -l 옵션 중복파일 세트 번호
-					printf("l: set number %s\n", optarg);
 					strcpy(set_num, optarg);
 					break;
 				case 'd': // -d 옵션 파일 리스트 번호
-					printf("d: list number %s\n", optarg);
 					strcpy(list_num, optarg);
 					break;
 				case 'i':
@@ -946,7 +942,7 @@ void delete_prompt(void)
 				deleted = deleted->next;
 
 			printf("\"%s\" has been deleted in #%d\n\n", deleted->path, atoi(list_num));
-	//		remove(deleted->path);
+			remove(deleted->path);
 			record_log("DELETE", deleted->path);
 			fileinfo_delete_node(target_infolist_p, deleted->path);
 
@@ -966,7 +962,7 @@ void delete_prompt(void)
 				fgets(ans, sizeof(ans), stdin);
 
 				if (!strcmp(ans, "y\n") || !strcmp(ans, "Y\n")){
-	//				remove(fileinfo_cur->path);
+					remove(fileinfo_cur->path);
 					fileinfo_cur = fileinfo_delete_node(target_infolist_p, fileinfo_cur->path);
 				}
 				else if (!strcmp(ans, "n\n") || !strcmp(ans, "N\n"))
@@ -992,7 +988,7 @@ void delete_prompt(void)
 					deleted = tmp; // 다음 노드로 건너뜀
 					continue;
 				}
-	//			remove(deleted->path);
+				remove(deleted->path);
 				free(deleted);
 				deleted = tmp;
 			}
@@ -1291,4 +1287,80 @@ void category_down_sort(fileList *head, char *category)
 
         filelist_cur = filelist_cur->next;
     }
+}
+
+/* 파일리스트의 내용을 카테고리비교를 통해 오름차순 정렬 */
+void category_up_sort(fileList *head, char *category)
+{
+	char c_flag = 'S';
+
+	if (!strcmp(category, "uid"))
+		c_flag = 'U';
+	else if (!strcmp(category, "gid"))
+		c_flag = 'G';
+	else if (!strcmp(category, "mode"))
+		c_flag = 'M';
+	else
+		c_flag = 'S';
+
+    fileList *filelist_cur = head->next;
+
+    while (filelist_cur != NULL) {
+        int swapped;
+        fileInfo *ptr;
+        fileInfo *lptr = NULL;
+        fileInfo *cur = filelist_cur->fileInfoList->next;
+
+        if (cur == NULL)
+            return;
+
+        do
+        {
+            swapped = 0;
+            ptr = cur;
+
+            while (ptr->next != lptr)
+            {
+				switch(c_flag)
+				{
+					case 'U':
+                        if (ptr->statbuf.st_uid > ptr->next->statbuf.st_uid)
+                        {
+                            path_swap(ptr, ptr->next);
+                            swapped = 1;
+                        }
+                        break;
+
+                    case 'G':
+                        if (ptr->statbuf.st_gid > ptr->next->statbuf.st_gid)
+                        {
+                            path_swap(ptr, ptr->next);
+                            swapped = 1;
+                        }
+                        break;
+
+                    case 'M':
+                        if (ptr->statbuf.st_mode > ptr->next->statbuf.st_mode)
+                        {
+                            path_swap(ptr, ptr->next);
+                            swapped = 1;
+                        }
+                        break;
+
+                    case 'S':
+                        if (ptr->statbuf.st_size > ptr->next->statbuf.st_size)
+                        {
+                            path_swap(ptr, ptr->next);
+                            swapped = 1;
+                        }
+                        break;
+                }
+                ptr = ptr->next;
+			}
+			lptr = ptr;
+		}
+		while (swapped);
+
+		filelist_cur = filelist_cur->next;
+	}
 }
